@@ -21,11 +21,9 @@ class GraphModelCache:
 
         with self._lock:
             entry = self._cache.get(graph_id)
-
             if entry:
                 entry["last_used"] = now
-                base_model = entry["graph_model"]
-                return self._clone(base_model)
+                return entry["graph_model"]
 
         with sqlite_conn() as conn:
             base_model = GraphModel.load(conn, graph_id)
@@ -36,13 +34,7 @@ class GraphModelCache:
                 "last_used": now,
             }
 
-        return self._clone(base_model)
-
-    def _clone(self, base_model: GraphModel) -> GraphModel:
-        return GraphModel(
-            graph_id=base_model.graph_id,
-            graph=base_model.graph.copy()
-        )
+        return base_model
 
     def _start_cleanup_worker(self):
         thread = threading.Thread(
