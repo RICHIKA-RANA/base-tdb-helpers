@@ -15,7 +15,7 @@ packages = [{ include = "talkingdb" }]
 python = ">=3.12,<3.14"
 
 talkingdb-models = { git = "git+https://github.com/TalkingDB/base-tdb-models.git", rev = "cd57f4b0f6a4f744e57ddb78d392b215f3c0f7b7" }
-talkingdb-clients = { git = "git+https://github.com/TalkingDB/base-tdb-clients.git", rev = "e73b24e74cbf564094c1b9df4203d82caa2bfd87" }
+talkingdb-clients = { git = "git+https://github.com/TalkingDB/base-tdb-clients.git", rev = "3a5b2fb72af64d3b04788bbd78f73be528dc84f8" }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
