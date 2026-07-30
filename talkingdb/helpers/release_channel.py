@@ -15,6 +15,7 @@ Anything else (localhost, 127.0.0.1, an unrecognised host) falls back to
 import re
 
 from fastapi import Request
+from talkingdb.logger.console import logger
 
 _CHANNEL_PATTERN = re.compile(r"^(ttt-(?:rc\d+|v\d+))(?:[.:]|$)")
 
@@ -35,4 +36,10 @@ def get_release_channel(request: Request) -> str:
     ).strip().lower()
 
     match = _CHANNEL_PATTERN.match(host)
-    return match.group(1) if match else DEFAULT_CHANNEL
+    if not match:
+        logger.warning(
+            "Could not resolve release channel from host=%r; falling back to default channel %r",
+            host, DEFAULT_CHANNEL,
+        )
+        return DEFAULT_CHANNEL
+    return match.group(1)

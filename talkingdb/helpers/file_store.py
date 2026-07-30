@@ -2,19 +2,20 @@
 
 Layout: {bucket}/files/{channel}/{hash[0:2]}/{hash[2:4]}/{hash}
 `rc` isolates release channels (including "localhost"); within a channel,
-files dedup by md5 hash.
+files dedup by sha256 hash.
 """
 
 import hashlib
 from datetime import timedelta
 from typing import Optional
+from minio.error import S3Error
 
-from talkingdb.clients.minio import get_minio_client, MINIO_BUCKET, ensure_bucket
+from talkingdb.clients.minio import get_minio_client, MINIO_BUCKET
 
 
-def compute_md5(local_path: str, chunk_size: int = 1024 * 1024) -> str:
+def compute_sha256(local_path: str, chunk_size: int = 1024 * 1024) -> str:
     """Stream-hash a file on disk so large uploads don't load into memory."""
-    hasher = hashlib.md5()
+    hasher = hashlib.sha256()
     with open(local_path, "rb") as fh:
         while True:
             chunk = fh.read(chunk_size)
@@ -36,14 +37,15 @@ def upload_file(channel: str, file_hash: str, local_path: str) -> str:
     per-channel dedup.
     """
     client = get_minio_client()
-    ensure_bucket()
+    
     key = object_path(channel, file_hash)
 
     try:
         client.stat_object(MINIO_BUCKET, key)
         return key
-    except Exception:
-        pass
+    except S3Error as e:
+        if e.code == "NoSuchKey":
+            raise
 
     client.fput_object(MINIO_BUCKET, key, local_path)
     return key
@@ -59,8 +61,10 @@ def get_presigned_url(
         return client.presigned_get_object(
             MINIO_BUCKET, key, expires=timedelta(minutes=expires_minutes)
         )
-    except Exception:
-        return None
+    except S3Error as e:
+        if e.code == "NoSuchKey":
+            return None
+        raise
 
 def get_file_stream(channel: str, file_hash: str):
     """Open a streaming read of the object from MinIO.
@@ -72,8 +76,10 @@ def get_file_stream(channel: str, file_hash: str):
     key = object_path(channel, file_hash)
     try:
         return client.get_object(MINIO_BUCKET, key)
-    except Exception:
-        return None
+    except S3Error as e:
+        if e.code == "NoSuchKey":
+            return None
+        raise
 
 def delete_file(channel: str, file_hash: str) -> None:
     """Idempotent - safe to call even if the object is already gone."""
@@ -81,5 +87,7 @@ def delete_file(channel: str, file_hash: str) -> None:
     key = object_path(channel, file_hash)
     try:
         client.remove_object(MINIO_BUCKET, key)
-    except Exception:
-        pass
+    except S3Error as e:
+        if e.code == "NoSuchKey":
+            return None
+        raise
