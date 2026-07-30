@@ -44,7 +44,7 @@ def upload_file(channel: str, file_hash: str, local_path: str) -> str:
         client.stat_object(MINIO_BUCKET, key)
         return key
     except S3Error as e:
-        if e.code == "NoSuchKey":
+        if e.code != "NoSuchKey":
             raise
 
     client.fput_object(MINIO_BUCKET, key, local_path)
@@ -65,6 +65,18 @@ def get_presigned_url(
         if e.code == "NoSuchKey":
             return None
         raise
+
+def stat_file(channel: str, file_hash: str):
+    """Return the object's stat info (has .size), or None if missing."""
+    client = get_minio_client()
+    key = object_path(channel, file_hash)
+    try:
+        return client.stat_object(MINIO_BUCKET, key)
+    except S3Error as e:
+        if e.code == "NoSuchKey":
+            return None
+        raise
+
 
 def get_file_stream(channel: str, file_hash: str):
     """Open a streaming read of the object from MinIO.
