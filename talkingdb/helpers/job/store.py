@@ -82,6 +82,8 @@ def init_db(conn: sqlite3.Connection) -> None:
             job_type         TEXT NOT NULL,
             session_id       TEXT,
             namespace        TEXT,
+            project_id       TEXT,
+            owner_email      TEXT,
             title            TEXT,
             description      TEXT,
             suggested_queries TEXT,
@@ -115,7 +117,15 @@ def init_db(conn: sqlite3.Connection) -> None:
     if "session_id" not in existing_cols and existing_cols:
         conn.execute("ALTER TABLE jobs ADD COLUMN session_id TEXT")
 
-    for col in ("namespace", "title", "description", "suggested_queries", "progress_at"):
+    for col in (
+        "namespace",
+        "title",
+        "description",
+        "suggested_queries",
+        "progress_at",
+        "project_id",
+        "owner_email",
+    ):
         if col not in existing_cols and existing_cols:
             conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} TEXT")
 
@@ -124,6 +134,12 @@ def init_db(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_jobs_namespace ON jobs(namespace)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jobs_project ON jobs(project_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jobs_owner ON jobs(owner_email)"
     )
 
 
@@ -139,6 +155,8 @@ def _row_to_job(row: sqlite3.Row) -> JobModel:
         job_type=JobType(row["job_type"]),
         session_id=row["session_id"],
         namespace=row["namespace"],
+        project_id=row["project_id"],
+        owner_email=row["owner_email"],
         title=row["title"],
         description=row["description"],
         suggested_queries=_loads_list(row["suggested_queries"]),
@@ -172,18 +190,21 @@ def insert(conn: sqlite3.Connection, job: JobModel) -> None:
         """
         INSERT INTO jobs (
             job_id, job_type, session_id,
-            namespace, title, description, suggested_queries,
+            namespace, project_id, owner_email,
+            title, description, suggested_queries,
             state, stage,
             total_units, done_units, cancel_requested,
             filename, file_size_bytes, temp_path,
             created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             job.job_id,
             job.job_type.value,
             job.session_id,
             job.namespace,
+            job.project_id,
+            job.owner_email,
             job.title,
             job.description,
             _dumps_list(job.suggested_queries),
@@ -425,6 +446,46 @@ def list_documents(
             "ORDER BY created_at DESC, job_id DESC LIMIT ? OFFSET ?",
             (session_id, limit, offset),
         ).fetchall()
+    return [_row_to_job(r) for r in rows]
+
+
+def owner_document_stats(
+    conn: sqlite3.Connection, owner_email: str
+) -> Dict[Optional[str], Dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT project_id, COUNT(*) AS document_count, "
+        "MAX(created_at) AS last_interaction_at "
+        "FROM jobs WHERE owner_email = ? GROUP BY project_id",
+        (owner_email,),
+    ).fetchall()
+    return {
+        row["project_id"]: {
+            "document_count": row["document_count"],
+            "last_interaction_at": row["last_interaction_at"],
+        }
+        for row in rows
+    }
+
+
+def list_owner_documents(
+    conn: sqlite3.Connection,
+    owner_email: str,
+    *,
+    per_project: int = 50,
+) -> List[JobModel]:
+    rows = conn.execute(
+        """
+        SELECT * FROM (
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY project_id
+                ORDER BY created_at DESC, job_id DESC
+            ) AS _rn
+            FROM jobs WHERE owner_email = ?
+        ) WHERE _rn <= ?
+        ORDER BY created_at DESC, job_id DESC
+        """,
+        (owner_email, per_project),
+    ).fetchall()
     return [_row_to_job(r) for r in rows]
 
 
