@@ -8,12 +8,8 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def make_id(project_id: Optional[str] = None) -> str:
-    if not project_id:
-        return f"proj::{uuid4().hex}"
-    if project_id.startswith("proj::"):
-        return project_id
-    return f"proj::{project_id}"
+def make_id() -> str:
+    return f"proj::{uuid4().hex}"
 
 
 def init_db(conn: sqlite3.Connection) -> None:
@@ -33,7 +29,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             ON projects(owner_email);
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_owner_name
-            ON projects(owner_email, name);
+            ON projects(owner_email, lower(name));
         """
     )
 
