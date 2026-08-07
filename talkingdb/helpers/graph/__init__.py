@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from talkingdb.clients.sqlite import sqlite_conn
+from talkingdb.clients.sqlite import sqlite_conn, GRAPH_DB
 from talkingdb.helpers.graph import store as graph_store
 
 
@@ -13,5 +13,5 @@ def rollback_graph(graph_id: Optional[str]) -> None:
     """
     if not graph_id:
         return
-    with sqlite_conn() as conn:
+    with sqlite_conn(GRAPH_DB) as conn:
         graph_store.delete(conn, graph_id)

@@ -2,7 +2,7 @@ import threading
 import time
 from typing import Dict
 
-from talkingdb.clients.sqlite import sqlite_conn
+from talkingdb.clients.sqlite import sqlite_conn, GRAPH_DB
 from talkingdb.models.graph.graph import GraphModel
 
 
@@ -25,7 +25,7 @@ class GraphModelCache:
                 entry["last_used"] = now
                 return entry["graph_model"]
 
-        with sqlite_conn() as conn:
+        with sqlite_conn(GRAPH_DB) as conn:
             base_model = GraphModel.load(conn, graph_id)
 
         with self._lock:

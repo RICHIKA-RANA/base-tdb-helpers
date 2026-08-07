@@ -1,6 +1,6 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from talkingdb.clients.sqlite import sqlite_conn
+from talkingdb.clients.sqlite import sqlite_conn, GRAPH_DB
 from talkingdb.models.auth.api_key import APIKeyModel
 
 import bcrypt
@@ -13,7 +13,7 @@ def verify_api_key(
 ) -> str:
     api_key = credentials.credentials
 
-    with sqlite_conn() as conn:
+    with sqlite_conn(GRAPH_DB) as conn:
         user_email = APIKeyModel.verify(
             conn=conn,
             api_key=api_key,
