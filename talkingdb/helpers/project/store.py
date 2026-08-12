@@ -70,6 +70,26 @@ def create(
     return get(conn, project_id)
 
 
+def rename(
+    conn: sqlite3.Connection,
+    project_id: str,
+    owner_email: str,
+    *,
+    name: str,
+) -> Optional[Dict[str, Any]]:
+    cur = conn.execute(
+        """
+        UPDATE projects
+           SET name = ?, updated_at = ?
+         WHERE project_id = ? AND owner_email = ?
+        """,
+        (name, _now_iso(), project_id, owner_email),
+    )
+    if cur.rowcount == 0:
+        return None
+    return get(conn, project_id)
+
+
 # ------------------------------------------------------------------------ reads
 def get(conn: sqlite3.Connection, project_id: str) -> Optional[Dict[str, Any]]:
     row = conn.execute(
