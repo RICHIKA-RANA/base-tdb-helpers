@@ -100,6 +100,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             error_message    TEXT,
             filename         TEXT,
             file_size_bytes  INTEGER,
+            page_count       INTEGER,
             temp_path        TEXT,
             heartbeat_at     TEXT,
             progress_at      TEXT,
@@ -128,6 +129,9 @@ def init_db(conn: sqlite3.Connection) -> None:
     ):
         if col not in existing_cols and existing_cols:
             conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} TEXT")
+
+    if "page_count" not in existing_cols and existing_cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN page_count INTEGER")
 
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_jobs_session ON jobs(session_id)"
@@ -173,6 +177,7 @@ def _row_to_job(row: sqlite3.Row) -> JobModel:
         error_message=row["error_message"],
         filename=row["filename"],
         file_size_bytes=row["file_size_bytes"],
+        page_count=row["page_count"],
         temp_path=row["temp_path"],
         heartbeat_at=row["heartbeat_at"],
         progress_at=row["progress_at"],
@@ -400,6 +405,7 @@ def finalize(
     *,
     result_graph_id: Optional[str] = None,
     result_summary: Optional[Dict[str, Any]] = None,
+    page_count: Optional[int] = None,
     error_code: Optional[JobErrorCode] = None,
     error_message: Optional[str] = None,
     status_message: Optional[str] = None,
@@ -425,6 +431,7 @@ def finalize(
                progress_details = NULL,
                result_graph_id = COALESCE(?, result_graph_id),
                result_summary  = ?,
+               page_count      = COALESCE(?, page_count),
                error_code      = ?,
                error_message   = ?,
                status_message  = COALESCE(?, status_message),
@@ -436,6 +443,7 @@ def finalize(
             terminal_state.value,
             result_graph_id,
             _dumps(result_summary),
+            page_count,
             error_code.value if error_code else None,
             error_message,
             status_message,
