@@ -302,6 +302,42 @@ def update_progress(
     )
 
 
+def assign_to_project(
+    conn: sqlite3.Connection,
+    job_id: str,
+    *,
+    project_id: str,
+    owner_email: str,
+) -> bool:
+    cur = conn.execute(
+        """
+        UPDATE jobs
+           SET project_id = ?, updated_at = ?
+         WHERE job_id = ? AND owner_email = ?
+        """,
+        (project_id, _now_iso(), job_id, owner_email),
+    )
+    return cur.rowcount > 0
+
+
+def remove_from_project(
+    conn: sqlite3.Connection,
+    job_id: str,
+    *,
+    project_id: str,
+    owner_email: str,
+) -> bool:
+    cur = conn.execute(
+        """
+        UPDATE jobs
+           SET project_id = NULL, updated_at = ?
+         WHERE job_id = ? AND owner_email = ? AND project_id = ?
+        """,
+        (_now_iso(), job_id, owner_email, project_id),
+    )
+    return cur.rowcount > 0
+
+
 def request_cancel(conn: sqlite3.Connection, job_id: str) -> Optional[JobModel]:
     """Cooperative cancel.
 
@@ -485,6 +521,22 @@ def list_owner_documents(
         ORDER BY created_at DESC, job_id DESC
         """,
         (owner_email, per_project),
+    ).fetchall()
+    return [_row_to_job(r) for r in rows]
+
+
+def list_project_documents(
+    conn: sqlite3.Connection,
+    project_id: str,
+    owner_email: str,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+) -> List[JobModel]:
+    rows = conn.execute(
+        "SELECT * FROM jobs WHERE project_id = ? AND owner_email = ? "
+        "ORDER BY created_at DESC, job_id DESC LIMIT ? OFFSET ?",
+        (project_id, owner_email, limit, offset),
     ).fetchall()
     return [_row_to_job(r) for r in rows]
 
