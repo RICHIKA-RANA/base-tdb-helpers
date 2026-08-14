@@ -18,7 +18,7 @@ bcrypt = "^5.0.0"
 python-jose = { extras = ["cryptography"], version = "^3.3.0" }
 lxml = ">=6.0.0,<7.0.0"
 
-talkingdb-models = { git = "git+https://github.com/TalkingDB/base-tdb-models.git", rev = "e4670ca4338c154dc048acc1eb480620447f696f" }
+talkingdb-models = { git = "git+https://github.com/TalkingDB/base-tdb-models.git", rev = "adc2d6a23801a7af01975f23d847e241220ffa06" }
 talkingdb-clients = { git = "git+https://github.com/TalkingDB/base-tdb-clients.git", rev = "9931c1f832d4772f5137cdc4bb193daadab2ad30" }
 
 [build-system]
