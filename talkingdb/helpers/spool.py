@@ -7,7 +7,7 @@ from typing import Optional, Tuple
 
 from fastapi import HTTPException, UploadFile, status
 
-from talkingdb.helpers.validation import MAX_FILE_SIZE_BYTES, MAX_FILE_SIZE_MB
+from talkingdb.helpers.validation import ext_of, max_file_size_mb_for
 
 
 SPOOL_DIR = os.getenv("TDB_SPOOL_DIR", "/var/tmp/tdb-spool")
@@ -55,8 +55,9 @@ async def spool_upload(
 ) -> Tuple[str, int]:
     """Stream an uploaded file to local disk with bounded memory usage."""
     target = spool_dir or SPOOL_DIR
-    cap_bytes = max_size_bytes if max_size_bytes is not None else MAX_FILE_SIZE_BYTES
-    cap_mb = max_size_mb if max_size_mb is not None else MAX_FILE_SIZE_MB
+    default_cap_mb = max_file_size_mb_for(ext_of(file.filename))
+    cap_mb = max_size_mb if max_size_mb is not None else default_cap_mb
+    cap_bytes = max_size_bytes if max_size_bytes is not None else cap_mb * 1024 * 1024
     chunk = chunk_size or SPOOL_CHUNK_BYTES
 
     if suffix is None:
