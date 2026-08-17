@@ -3,6 +3,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from talkingdb.models.failure.reason import FailureReason
 from talkingdb.models.job.error import JobErrorCode
 from talkingdb.models.job.job import JobModel
 from talkingdb.models.job.stage import JobStage
@@ -98,6 +99,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             status_message   TEXT,
             error_code       TEXT,
             error_message    TEXT,
+            failure_reason   TEXT,
             filename         TEXT,
             file_size_bytes  INTEGER,
             page_count       INTEGER,
@@ -126,6 +128,7 @@ def init_db(conn: sqlite3.Connection) -> None:
         "progress_at",
         "project_id",
         "owner_email",
+        "failure_reason",
     ):
         if col not in existing_cols and existing_cols:
             conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} TEXT")
@@ -175,6 +178,9 @@ def _row_to_job(row: sqlite3.Row) -> JobModel:
         status_message=row["status_message"],
         error_code=JobErrorCode(row["error_code"]) if row["error_code"] else None,
         error_message=row["error_message"],
+        failure_reason=(
+            FailureReason(row["failure_reason"]) if row["failure_reason"] else None
+        ),
         filename=row["filename"],
         file_size_bytes=row["file_size_bytes"],
         page_count=row["page_count"],
@@ -408,6 +414,7 @@ def finalize(
     page_count: Optional[int] = None,
     error_code: Optional[JobErrorCode] = None,
     error_message: Optional[str] = None,
+    failure_reason: Optional[FailureReason] = None,
     status_message: Optional[str] = None,
 ) -> bool:
     """Apply the single terminal transition.
@@ -434,6 +441,7 @@ def finalize(
                page_count      = COALESCE(?, page_count),
                error_code      = ?,
                error_message   = ?,
+               failure_reason  = ?,
                status_message  = COALESCE(?, status_message),
                completed_at    = ?, updated_at = ?
          WHERE job_id = ? AND state NOT IN ({_TERMINAL_PLACEHOLDERS})
@@ -446,6 +454,7 @@ def finalize(
             page_count,
             error_code.value if error_code else None,
             error_message,
+            failure_reason.value if failure_reason else None,
             status_message,
             now,
             now,

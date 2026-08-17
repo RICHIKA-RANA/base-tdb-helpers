@@ -3,6 +3,9 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, UploadFile, status
 
+from talkingdb.models.failure import messages
+from talkingdb.models.failure.reason import FailureReason
+
 
 def _env_int(name: str, default: int) -> int:
     raw = os.getenv(name)
@@ -94,8 +97,11 @@ def validate_file_type(file: UploadFile) -> str:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail={
-                "error_code": "UNSUPPORTED_FILE_TYPE",
-                "message": f"File type '.{ext}' is not supported" if ext else "File has no extension",
+                "error_code": FailureReason.UNSUPPORTED_FILE_TYPE.value,
+                "failure_reason": FailureReason.UNSUPPORTED_FILE_TYPE.value,
+                "message": messages.unsupported_file_type_message(
+                    SUPPORTED_TYPES
+                ),
                 "supported_types": sorted(SUPPORTED_TYPES),
             },
         )
@@ -123,8 +129,9 @@ def assert_content_length_within_cap(
     raise HTTPException(
         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
         detail={
-            "error_code": "FILE_TOO_LARGE",
-            "message": f"File exceeds the maximum allowed size ({cap_mb}MB)",
+            "error_code": FailureReason.FILE_TOO_LARGE.value,
+            "failure_reason": FailureReason.FILE_TOO_LARGE.value,
+            "message": messages.file_too_large_message(cap_mb),
             "max_file_size_mb": cap_mb,
         },
     )
