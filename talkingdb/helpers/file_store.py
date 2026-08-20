@@ -10,7 +10,8 @@ from datetime import timedelta
 from typing import Optional
 from minio.error import S3Error
 
-from talkingdb.clients.minio import get_minio_client, MINIO_BUCKET
+from talkingdb.clients.minio import get_minio_client, is_configured, MINIO_BUCKET
+from talkingdb.logger.console import logger
 
 
 def compute_sha256(local_path: str, chunk_size: int = 1024 * 1024) -> str:
@@ -30,14 +31,21 @@ def object_path(channel: str, file_hash: str) -> str:
     return f"files/{channel}/{file_hash[0:2]}/{file_hash[2:4]}/{file_hash}"
 
 
-def upload_file(channel: str, file_hash: str, local_path: str) -> str:
+def upload_file(channel: str, file_hash: str, local_path: str) -> Optional[str]:
     """Upload to MinIO under its content-addressed path.
 
     No-op if the object already exists for this (channel, hash) - this is the
     per-channel dedup.
     """
+    if not is_configured():
+        logger.warning(
+            "MinIO not configured - skipping storage of file (channel=%s, hash=%s)",
+            channel, file_hash,
+        )
+        return None
+
     client = get_minio_client()
-    
+
     key = object_path(channel, file_hash)
 
     try:
@@ -54,7 +62,12 @@ def upload_file(channel: str, file_hash: str, local_path: str) -> str:
 def get_presigned_url(
     channel: str, file_hash: str, expires_minutes: int = 15
 ) -> Optional[str]:
-    """Time-limited URL the frontend can fetch the file from directly."""
+    """Time-limited URL the frontend can fetch the file from directly.
+
+    Returns None if MinIO isn't configured - there's nothing stored to link to.
+    """
+    if not is_configured():
+        return None
     client = get_minio_client()
     key = object_path(channel, file_hash)
     try:
@@ -67,7 +80,12 @@ def get_presigned_url(
         raise
 
 def stat_file(channel: str, file_hash: str):
-    """Return the object's stat info (has .size), or None if missing."""
+    """Return the object's stat info (has .size), or None if missing.
+
+    Also returns None, if MinIO isn't configured.
+    """
+    if not is_configured():
+        return None
     client = get_minio_client()
     key = object_path(channel, file_hash)
     try:
@@ -82,8 +100,11 @@ def get_file_stream(channel: str, file_hash: str):
     """Open a streaming read of the object from MinIO.
 
     Returns the raw urllib3 response (has .read(chunk) and must be closed
-    by the caller via .close() + .release_conn()), or None if missing.
+    by the caller via .close() + .release_conn()), or None if missing or if
+    MinIO isn't configured.
     """
+    if not is_configured():
+        return None
     client = get_minio_client()
     key = object_path(channel, file_hash)
     try:
@@ -94,7 +115,12 @@ def get_file_stream(channel: str, file_hash: str):
         raise
 
 def delete_file(channel: str, file_hash: str) -> None:
-    """Idempotent - safe to call even if the object is already gone."""
+    """Idempotent - safe to call even if the object is already gone.
+
+    No-op if MinIO isn't configured - there's nothing to delete.
+    """
+    if not is_configured():
+        return None
     client = get_minio_client()
     key = object_path(channel, file_hash)
     try:
