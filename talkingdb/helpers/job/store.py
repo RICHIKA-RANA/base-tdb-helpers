@@ -93,6 +93,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             total_units      INTEGER DEFAULT 0,
             done_units       INTEGER DEFAULT 0,
             cancel_requested INTEGER DEFAULT 0,
+            cancel_requested_at TEXT,
             result_graph_id  TEXT,
             result_summary   TEXT,
             progress_details TEXT,
@@ -129,6 +130,7 @@ def init_db(conn: sqlite3.Connection) -> None:
         "project_id",
         "owner_email",
         "failure_reason",
+        "cancel_requested_at",
     ):
         if col not in existing_cols and existing_cols:
             conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} TEXT")
@@ -172,6 +174,7 @@ def _row_to_job(row: sqlite3.Row) -> JobModel:
         total_units=row["total_units"] or 0,
         done_units=row["done_units"] or 0,
         cancel_requested=bool(row["cancel_requested"]),
+        cancel_requested_at=row["cancel_requested_at"],
         result_graph_id=row["result_graph_id"],
         result_summary=_loads(row["result_summary"]),
         progress_details=_loads(row["progress_details"]),
@@ -367,13 +370,14 @@ def request_cancel(conn: sqlite3.Connection, job_id: str) -> Optional[JobModel]:
     conn.execute(
         """
         UPDATE jobs
-           SET state = ?, cancel_requested = 1,
+           SET state = ?, cancel_requested = 1, cancel_requested_at = ?,
                stage = NULL,
                status_message = ?, completed_at = ?, updated_at = ?
          WHERE job_id = ? AND state = ?
         """,
         (
             JobState.CANCELLED.value,
+            now,
             "Upload cancelled before processing started",
             now,
             now,
@@ -385,14 +389,14 @@ def request_cancel(conn: sqlite3.Connection, job_id: str) -> Optional[JobModel]:
     conn.execute(
         """
         UPDATE jobs
-           SET state = ?, cancel_requested = 1,
-               stage = NULL,
+           SET state = ?, cancel_requested = 1, cancel_requested_at = ?,
                status_message = ?, updated_at = ?,
                done_units = 0, total_units = 0
          WHERE job_id = ? AND state = ?
         """,
         (
             JobState.CANCELLING.value,
+            now,
             "Cancelling upload...",
             now,
             job_id,
@@ -416,15 +420,15 @@ def finalize(
     error_message: Optional[str] = None,
     failure_reason: Optional[FailureReason] = None,
     status_message: Optional[str] = None,
-) -> bool:
-    """Apply the single terminal transition.
+) -> Optional[JobState]:
+    """Atomically transition a job to its terminal state.
 
-    State-guarded (``state NOT IN terminal``) so exactly one caller - the
-    worker OR the orphan sweep - can win. ``stage`` is cleared to NULL per the
-    frozen invariant that a terminal job has no stage. ``progress_details`` is
-    cleared (non-contractual, live-only).
+    Only the first caller can transition a non-terminal job. Cancellation takes
+    priority if the job is CANCELLING when the update executes. Terminal jobs have
+    no stage and their live progress details are cleared.
 
-    Returns True if this call performed the transition.
+    Returns the written terminal state, or None if the transition was already
+    claimed. Cleanup decisions must use the returned state.
     """
     if not terminal_state.is_terminal():
         raise ValueError(f"{terminal_state} is not a terminal state")
@@ -433,21 +437,23 @@ def finalize(
     cur = conn.execute(
         f"""
         UPDATE jobs
-           SET state = ?,
-               stage = CASE WHEN ? IN ('CANCELLED', 'CANCELLING') THEN NULL ELSE stage END,
+           SET state = CASE WHEN state = 'CANCELLING' THEN 'CANCELLED' ELSE ? END,
+               stage = NULL,
                progress_details = NULL,
-               result_graph_id = COALESCE(?, result_graph_id),
-               result_summary  = ?,
-               page_count      = COALESCE(?, page_count),
-               error_code      = ?,
-               error_message   = ?,
-               failure_reason  = ?,
-               status_message  = COALESCE(?, status_message),
+               result_graph_id = CASE WHEN state = 'CANCELLING' THEN NULL
+                                       ELSE COALESCE(?, result_graph_id) END,
+               result_summary  = CASE WHEN state = 'CANCELLING' THEN NULL ELSE ? END,
+               page_count      = CASE WHEN state = 'CANCELLING' THEN NULL
+                                       ELSE COALESCE(?, page_count) END,
+               error_code      = CASE WHEN state = 'CANCELLING' THEN NULL ELSE ? END,
+               error_message   = CASE WHEN state = 'CANCELLING' THEN NULL ELSE ? END,
+               failure_reason  = CASE WHEN state = 'CANCELLING' THEN NULL ELSE ? END,
+               status_message  = CASE WHEN state = 'CANCELLING' THEN 'Upload cancelled, cleaned up'
+                                       ELSE COALESCE(?, status_message) END,
                completed_at    = ?, updated_at = ?
          WHERE job_id = ? AND state NOT IN ({_TERMINAL_PLACEHOLDERS})
         """,
         (
-            terminal_state.value,
             terminal_state.value,
             result_graph_id,
             _dumps(result_summary),
@@ -462,7 +468,13 @@ def finalize(
             *_TERMINAL,
         ),
     )
-    return cur.rowcount > 0
+    if cur.rowcount == 0:
+        return None
+
+    row = conn.execute(
+        "SELECT state FROM jobs WHERE job_id = ?", (job_id,)
+    ).fetchone()
+    return JobState(row["state"]) if row is not None else terminal_state
 
 
 # ------------------------------------------------------------------------ reads
