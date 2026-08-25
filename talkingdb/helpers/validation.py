@@ -21,7 +21,7 @@ DEFAULT_MAX_FILE_SIZE_MB = _env_int("TDB_MAX_FILE_SIZE_MB", 50)
 SUPPORTED_TYPES: Dict[str, Dict[str, Any]] = {
     "pdf": {
         "mime_type": "application/pdf",
-        "max_file_size_mb": _env_int("TDB_MAX_PDF_FILE_SIZE_MB", 25),
+        "max_file_size_mb": _env_int("TDB_MAX_PDF_FILE_SIZE_MB", 100),
     },
     "docx": {
         "mime_type": (
