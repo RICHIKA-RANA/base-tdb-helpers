@@ -63,6 +63,18 @@ def _loads_list(value: Optional[str]) -> Optional[List[str]]:
 _REQUIRED_COLUMNS = {"job_id", "job_type", "state"}
 
 
+def _add_column_if_missing(
+    conn: sqlite3.Connection, existing_cols: set, column: str, ddl_type: str
+) -> None:
+    if column in existing_cols:
+        return
+    try:
+        conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {ddl_type}")
+    except sqlite3.OperationalError as exc:
+        if "duplicate column name" not in str(exc):
+            raise
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     """Create the jobs table and supporting indexes (idempotent)."""
     existing_cols = {
@@ -105,6 +117,8 @@ def init_db(conn: sqlite3.Connection) -> None:
             file_size_bytes  INTEGER,
             page_count       INTEGER,
             temp_path        TEXT,
+            metadata_json    TEXT,
+            retry_count      INTEGER NOT NULL DEFAULT 0,
             heartbeat_at     TEXT,
             progress_at      TEXT,
             started_at       TEXT,
@@ -118,25 +132,26 @@ def init_db(conn: sqlite3.Connection) -> None:
         """
     )
 
-    if "session_id" not in existing_cols and existing_cols:
-        conn.execute("ALTER TABLE jobs ADD COLUMN session_id TEXT")
+    if existing_cols:
+        for col in (
+            "session_id",
+            "namespace",
+            "title",
+            "description",
+            "suggested_queries",
+            "progress_at",
+            "project_id",
+            "owner_email",
+            "failure_reason",
+            "cancel_requested_at",
+            "metadata_json",
+        ):
+            _add_column_if_missing(conn, existing_cols, col, "TEXT")
 
-    for col in (
-        "namespace",
-        "title",
-        "description",
-        "suggested_queries",
-        "progress_at",
-        "project_id",
-        "owner_email",
-        "failure_reason",
-        "cancel_requested_at",
-    ):
-        if col not in existing_cols and existing_cols:
-            conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} TEXT")
-
-    if "page_count" not in existing_cols and existing_cols:
-        conn.execute("ALTER TABLE jobs ADD COLUMN page_count INTEGER")
+        _add_column_if_missing(conn, existing_cols, "page_count", "INTEGER")
+        _add_column_if_missing(
+            conn, existing_cols, "retry_count", "INTEGER NOT NULL DEFAULT 0"
+        )
 
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_jobs_session ON jobs(session_id)"
@@ -149,6 +164,18 @@ def init_db(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_jobs_owner ON jobs(owner_email)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS job_admission (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            in_flight INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO job_admission (id, in_flight) VALUES (1, 0)"
     )
 
 
@@ -188,6 +215,8 @@ def _row_to_job(row: sqlite3.Row) -> JobModel:
         file_size_bytes=row["file_size_bytes"],
         page_count=row["page_count"],
         temp_path=row["temp_path"],
+        metadata_json=row["metadata_json"],
+        retry_count=row["retry_count"] or 0,
         heartbeat_at=row["heartbeat_at"],
         progress_at=row["progress_at"],
         started_at=row["started_at"],
@@ -208,9 +237,9 @@ def insert(conn: sqlite3.Connection, job: JobModel) -> None:
             title, description, suggested_queries,
             state, stage,
             total_units, done_units, cancel_requested,
-            filename, file_size_bytes, temp_path,
+            filename, file_size_bytes, temp_path, metadata_json,
             created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             job.job_id,
@@ -230,6 +259,7 @@ def insert(conn: sqlite3.Connection, job: JobModel) -> None:
             job.filename,
             job.file_size_bytes,
             job.temp_path,
+            job.metadata_json,
             job.created_at,
             job.updated_at,
         ),
@@ -254,6 +284,39 @@ def mark_ongoing(conn: sqlite3.Connection, job_id: str, started_at: str) -> bool
         ),
     )
     return cur.rowcount > 0
+
+
+def reset_for_retry(
+    conn: sqlite3.Connection, job_id: str, *, temp_path: str, max_retries: int
+) -> Optional[JobModel]:
+    now = _now_iso()
+    cur = conn.execute(
+        """
+        UPDATE jobs
+           SET state = ?, stage = NULL,
+               total_units = 0, done_units = 0,
+               error_code = NULL, error_message = NULL, failure_reason = NULL,
+               result_graph_id = NULL, result_summary = NULL, page_count = NULL,
+               temp_path = ?, retry_count = retry_count + 1,
+               status_message = ?, completed_at = NULL,
+               heartbeat_at = ?, progress_at = NULL, started_at = NULL,
+               updated_at = ?
+         WHERE job_id = ? AND state = ? AND retry_count < ?
+        """,
+        (
+            JobState.QUEUED.value,
+            temp_path,
+            "Retrying from last checkpoint...",
+            now,
+            now,
+            job_id,
+            JobState.FAILED.value,
+            max_retries,
+        ),
+    )
+    if cur.rowcount == 0:
+        return None
+    return get(conn, job_id)
 
 
 def update_progress(
@@ -723,6 +786,42 @@ def select_retention_expired(
 def delete(conn: sqlite3.Connection, job_id: str) -> None:
     """Hard-delete a job row (used by retention)."""
     conn.execute("DELETE FROM jobs WHERE job_id = ?", (job_id,))
+
+
+def delete_if_terminal(conn: sqlite3.Connection, job_id: str) -> bool:
+    cur = conn.execute(
+        f"DELETE FROM jobs WHERE job_id = ? AND state IN ({_TERMINAL_PLACEHOLDERS})",
+        (job_id, *_TERMINAL),
+    )
+    return cur.rowcount > 0
+
+
+# ------------------------------------------------------------- admission
+def acquire_admission_slot(conn: sqlite3.Connection, capacity: int) -> bool:
+    cur = conn.execute(
+        "UPDATE job_admission SET in_flight = in_flight + 1 "
+        "WHERE id = 1 AND in_flight < ?",
+        (capacity,),
+    )
+    return cur.rowcount > 0
+
+
+def release_admission_slot(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "UPDATE job_admission SET in_flight = MAX(in_flight - 1, 0) WHERE id = 1"
+    )
+
+
+def reconcile_admission_slot(conn: sqlite3.Connection) -> int:
+    row = conn.execute(
+        f"SELECT COUNT(*) AS n FROM jobs WHERE state IN ({_NON_TERMINAL_PLACEHOLDERS})",
+        _NON_TERMINAL,
+    ).fetchone()
+    live_count = row["n"]
+    conn.execute(
+        "UPDATE job_admission SET in_flight = ? WHERE id = 1", (live_count,)
+    )
+    return live_count
 
 
 def select_referenced_temp_paths(conn: sqlite3.Connection) -> set[str]:
