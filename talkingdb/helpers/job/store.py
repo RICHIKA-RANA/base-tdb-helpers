@@ -812,6 +812,18 @@ def release_admission_slot(conn: sqlite3.Connection) -> None:
     )
 
 
+def reconcile_admission_slot(conn: sqlite3.Connection) -> int:
+    row = conn.execute(
+        f"SELECT COUNT(*) AS n FROM jobs WHERE state IN ({_NON_TERMINAL_PLACEHOLDERS})",
+        _NON_TERMINAL,
+    ).fetchone()
+    live_count = row["n"]
+    conn.execute(
+        "UPDATE job_admission SET in_flight = ? WHERE id = 1", (live_count,)
+    )
+    return live_count
+
+
 def select_referenced_temp_paths(conn: sqlite3.Connection) -> set[str]:
     """Every temp path still referenced by a (non-deleted) job row."""
     rows = conn.execute(
