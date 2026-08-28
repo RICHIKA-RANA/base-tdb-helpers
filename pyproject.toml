@@ -18,8 +18,8 @@ bcrypt = "^5.0.0"
 python-jose = { extras = ["cryptography"], version = "^3.3.0" }
 lxml = ">=6.0.0,<7.0.0"
 
-talkingdb-models = { git = "git+https://github.com/TalkingDB/base-tdb-models.git", rev = "6ad6e83c8968c718ac95c018f773dc0ba35f8cd1" }
-talkingdb-clients = { git = "git+https://github.com/TalkingDB/base-tdb-clients.git", rev = "29abea220d96efac7b3ecee9deb9f5af49636174" }
+talkingdb-models = { path = "../base-tdb-models", develop = true }
+talkingdb-clients = { path = "../base-tdb-clients", develop = true }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
