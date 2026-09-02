@@ -80,18 +80,6 @@ def set_graph_id(conn: sqlite3.Connection, job_id: str, graph_id: str) -> None:
         )
 
 
-def update_file_hash(conn: sqlite3.Connection, job_id: str, file_hash: str) -> None:
-    """Point a job's mapping at the final stored blob hash (e.g. baked docx)."""
-    with conn:
-        conn.execute(
-            """
-            UPDATE file_graph_mapping
-            SET file_hash = ?, updated_at = ?
-            WHERE job_id = ?
-            """,
-            (file_hash, _now_iso(), job_id),
-        )
-
 
 def get_by_job_id(conn: sqlite3.Connection, job_id: str) -> Optional[FileGraphMappingModel]:
     row = conn.execute(

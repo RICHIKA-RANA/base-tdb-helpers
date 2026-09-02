@@ -59,6 +59,26 @@ def upload_file(channel: str, file_hash: str, local_path: str) -> Optional[str]:
     return key
 
 
+def overwrite_file(channel: str, file_hash: str, local_path: str) -> Optional[str]:
+    """Upload to MinIO under (channel, file_hash), replacing any existing
+    object at that key.
+
+    The key (channel, file_hash) never changes - only the bytes behind it do -
+    so there's no DB row to repoint and nothing to race.
+    """
+    if not is_configured():
+        logger.warning(
+            "MinIO not configured - skipping overwrite of file (channel=%s, hash=%s)",
+            channel, file_hash,
+        )
+        return None
+
+    client = get_minio_client()
+    key = object_path(channel, file_hash)
+    client.fput_object(MINIO_BUCKET, key, local_path)
+    return key
+
+
 def get_presigned_url(
     channel: str, file_hash: str, expires_minutes: int = 15
 ) -> Optional[str]:
