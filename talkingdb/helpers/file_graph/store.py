@@ -80,6 +80,7 @@ def set_graph_id(conn: sqlite3.Connection, job_id: str, graph_id: str) -> None:
         )
 
 
+
 def get_by_job_id(conn: sqlite3.Connection, job_id: str) -> Optional[FileGraphMappingModel]:
     row = conn.execute(
         "SELECT * FROM file_graph_mapping WHERE job_id = ? ORDER BY id DESC LIMIT 1",
